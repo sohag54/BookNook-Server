@@ -192,7 +192,8 @@ const updateBook = async (req, res) => {
 
 /**
  * DELETE /books/:id - Delete a book (Protected route)
- * Ensures book ownership: only the user who added the book can delete it.
+ * 1. Ensures book ownership: only creator can delete
+ * 2. Integrity check: verifies no users currently have the book borrowed
  */
 const deleteBook = async (req, res) => {
   try {
@@ -220,6 +221,17 @@ const deleteBook = async (req, res) => {
     if (existingBook.userEmail !== req.user.email) {
       return res.status(403).send({
         message: "Forbidden: You can only delete books that you added",
+      });
+    }
+
+    // Check for active borrows before deletion
+    const activeBorrows = await db.collection("borrows").countDocuments({
+      bookId: id,
+    });
+
+    if (activeBorrows > 0) {
+      return res.status(400).send({
+        message: "Cannot delete this book because it is currently borrowed by active readers.",
       });
     }
 

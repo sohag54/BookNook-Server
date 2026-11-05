@@ -2,18 +2,37 @@ const { getDB } = require("../config/db");
 const { ObjectId } = require("mongodb");
 const { validateBorrowData } = require("../utils/verifyData");
 
+// Helper to ensure database-level unique index on borrows collection
+let indexInitialized = false;
+const ensureBorrowIndexes = async (db) => {
+  if (indexInitialized || !db) return;
+  try {
+    // Unique compound index: a user can only have one borrow record per bookId
+    await db.collection("borrows").createIndex(
+      { bookId: 1, userEmail: 1 },
+      { unique: true, background: true }
+    );
+    indexInitialized = true;
+  } catch (err) {
+    // Index may already exist or collection is empty/mocked
+    indexInitialized = true;
+  }
+};
+
 /**
  * POST /borrows - Borrow a book (Protected route)
- * 1. Checks for double-borrowing (user cannot borrow the same book twice simultaneously)
+ * 1. Database-level unique index prevents simultaneous duplicate borrows
  * 2. Checks available copies > 0
  * 3. Atomically decrements available copies by 1 with $inc
  * 4. Inserts borrow record into "borrows" collection
+ * 5. Automatic rollback if insert fails
  */
 const borrowBook = async (req, res) => {
   try {
     const db = getDB();
-    const validation = validateBorrowData(req.body);
+    await ensureBorrowIndexes(db);
 
+    const validation = validateBorrowData(req.body);
     if (!validation.isValid) {
       return res.status(400).send({
         message: "Validation failed",
@@ -31,7 +50,7 @@ const borrowBook = async (req, res) => {
       });
     }
 
-    // 1. Prevent duplicate borrow: Check if user currently has this book borrowed
+    // 1. Pre-check: Check if user currently has this book borrowed
     const existingBorrow = await db.collection("borrows").findOne({
       bookId: bookId,
       userEmail: userEmail,
@@ -43,7 +62,7 @@ const borrowBook = async (req, res) => {
       });
     }
 
-    // 2. Safely decrement copies by 1 only if copies > 0 (atomic operation)
+    // 2. Atomically decrement copies by 1 ONLY if copies > 0
     const updateResult = await db.collection("books").findOneAndUpdate(
       {
         _id: new ObjectId(bookId),
@@ -57,11 +76,10 @@ const borrowBook = async (req, res) => {
       }
     );
 
-    // If updateResult is null (or .value is null depending on MongoDB driver version)
     const updatedBook = updateResult && updateResult.value !== undefined ? updateResult.value : updateResult;
 
     if (!updatedBook) {
-      // Check if book exists at all or just out of copies
+      // Check if book exists or if it's completely out of stock
       const bookExists = await db.collection("books").findOne({
         _id: new ObjectId(bookId),
       });
@@ -99,11 +117,19 @@ const borrowBook = async (req, res) => {
         remainingCopies: updatedBook.copies,
       });
     } catch (insertError) {
-      // Rollback copies decrement if insert fails
+      // Compensating rollback: restore decremented copy count
       await db.collection("books").updateOne(
         { _id: new ObjectId(bookId) },
         { $inc: { copies: 1 } }
       );
+
+      // Handle MongoDB E11000 duplicate key error (concurrency protection)
+      if (insertError.code === 11000) {
+        return res.status(400).send({
+          message: "You have already borrowed this book. Please return it before borrowing again.",
+        });
+      }
+
       throw insertError;
     }
   } catch (error) {
@@ -139,9 +165,8 @@ const getUserBorrows = async (req, res) => {
 
 /**
  * DELETE /borrows/:id - Return a borrowed book (Protected route)
- * 1. Verifies ownership (only user who borrowed can return)
- * 2. Deletes borrow record
- * 3. Increments book copies by 1 with $inc
+ * 1. Atomically finds and deletes borrow record for the verified user
+ * 2. Increments book copies by 1 with $inc
  */
 const returnBook = async (req, res) => {
   try {
@@ -154,31 +179,35 @@ const returnBook = async (req, res) => {
       });
     }
 
-    // Find the borrow record
-    const borrowRecord = await db.collection("borrows").findOne({
+    // Atomic deletion: ensure it deletes only if owned by the logged-in user
+    const deleteResult = await db.collection("borrows").findOneAndDelete({
       _id: new ObjectId(id),
+      userEmail: req.user.email,
     });
 
-    if (!borrowRecord) {
+    const deletedRecord = deleteResult && deleteResult.value !== undefined ? deleteResult.value : deleteResult;
+
+    if (!deletedRecord) {
+      // Check if record exists under a different user to provide exact 403 vs 404
+      const otherBorrow = await db.collection("borrows").findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (otherBorrow) {
+        return res.status(403).send({
+          message: "Forbidden: You can only return books that you borrowed",
+        });
+      }
+
       return res.status(404).send({
         message: "Borrow record not found",
       });
     }
 
-    // Ownership check: must be the user who borrowed it
-    if (borrowRecord.userEmail !== req.user.email) {
-      return res.status(403).send({
-        message: "Forbidden: You can only return books that you borrowed",
-      });
-    }
-
-    // Remove borrow record
-    await db.collection("borrows").deleteOne({ _id: new ObjectId(id) });
-
-    // Increment available copies on the book
-    if (ObjectId.isValid(borrowRecord.bookId)) {
+    // Atomically increment available copies on the book
+    if (ObjectId.isValid(deletedRecord.bookId)) {
       await db.collection("books").updateOne(
-        { _id: new ObjectId(borrowRecord.bookId) },
+        { _id: new ObjectId(deletedRecord.bookId) },
         { $inc: { copies: 1 } }
       );
     }
@@ -200,4 +229,3 @@ module.exports = {
   getUserBorrows,
   returnBook,
 };
-
