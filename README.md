@@ -2,6 +2,9 @@
 
 BookNook is a small online library backend service built with Express.js and MongoDB. It powers user authentication, book catalog management, and an atomic borrowing/returning workflow.
 
+- **Repository**: [https://github.com/sohag54/BookNook-Server](https://github.com/sohag54/BookNook-Server)
+- **Frontend Repository**: [https://github.com/sohag54/BookNook-Client](https://github.com/sohag54/BookNook-Client)
+
 ## Features
 
 - **Book Catalog CRUD**: Public routes to view all books and book details, with protected routes to add, update, and delete books.
