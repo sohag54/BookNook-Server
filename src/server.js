@@ -12,7 +12,23 @@ const { notFoundHandler, errorHandler } = require("./middlewares/errorHandler");
 const app = express();
 
 // Middleware
-app.use(cors());
+const allowedOrigins = [
+  "http://localhost:3000",
+  process.env.CLIENT_URL,
+  process.env.CLIENT_URL && process.env.CLIENT_URL.replace(/\/$/, ""),
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (e.g. mobile apps, curl, automated test suites)
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
+  })
+);
 app.use(express.json());
 
 // Base Route
