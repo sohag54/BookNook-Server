@@ -8,14 +8,19 @@ const { connectDB, getDB } = require("./config/db");
 const bookRoutes = require("./routes/bookRoutes");
 const borrowRoutes = require("./routes/borrowRoutes");
 const { notFoundHandler, errorHandler } = require("./middlewares/errorHandler");
+const { toNodeHandler } = require("better-auth/node");
+const { auth } = require("./config/auth");
 
 const app = express();
 
 // Middleware
 const allowedOrigins = [
   "http://localhost:3000",
+  "https://book-nook-client-red.vercel.app",
   process.env.CLIENT_URL,
   process.env.CLIENT_URL && process.env.CLIENT_URL.replace(/\/$/, ""),
+  process.env.NEXT_PUBLIC_APP_URL,
+  process.env.NEXT_PUBLIC_APP_URL && process.env.NEXT_PUBLIC_APP_URL.replace(/\/$/, ""),
 ].filter(Boolean);
 
 app.use(
@@ -27,8 +32,14 @@ app.use(
       }
       return callback(null, false);
     },
+    credentials: true,
   })
 );
+
+// Better Auth Route - Express 5 compatible wildcard
+// Placed before express.json() to allow Better Auth to consume raw body streams
+app.all(["/api/auth", "/api/auth/{*path}"], toNodeHandler(auth));
+
 app.use(express.json());
 
 // Base Route

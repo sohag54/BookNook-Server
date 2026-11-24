@@ -28,4 +28,4 @@ const getDB = () => {
   return db;
 };
 
-module.exports = { connectDB, getDB };
+module.exports = { connectDB, getDB, client };
