@@ -7,6 +7,7 @@ const {
   deleteBook,
 } = require("../controllers/bookController");
 const verifyToken = require("../middlewares/verifyToken");
+const { uploadBookCover } = require("../middlewares/uploadImage");
 
 const router = express.Router();
 
@@ -15,7 +16,7 @@ router.get("/", getAllBooks);
 router.get("/:id", getBookById);
 
 // Protected routes (require valid JWT token)
-router.post("/", verifyToken, addBook);
+router.post("/", verifyToken, uploadBookCover, addBook);
 router.patch("/:id", verifyToken, updateBook);
 router.delete("/:id", verifyToken, deleteBook);
 

@@ -1,6 +1,7 @@
 const { getDB } = require("../config/db");
 const { ObjectId } = require("mongodb");
 const { validateBookData } = require("../utils/verifyData");
+const { uploadToImgBB } = require("../utils/imgbb");
 
 /**
  * GET /books - Get all books (public)
@@ -81,6 +82,19 @@ const getBookById = async (req, res) => {
 const addBook = async (req, res) => {
   try {
     const db = getDB();
+
+    // If an image file was uploaded via multipart/form-data, upload it to ImgBB
+    if (req.file) {
+      try {
+        const imageUrl = await uploadToImgBB(req.file.buffer, req.file.originalname);
+        req.body.image = imageUrl;
+      } catch (uploadError) {
+        return res.status(uploadError.status || 500).send({
+          message: uploadError.message || "Failed to upload image to ImgBB",
+        });
+      }
+    }
+
     const validation = validateBookData(req.body);
 
     if (!validation.isValid) {
